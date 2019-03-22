@@ -1,0 +1,901 @@
+---
+title: "FusionParserSandbox16112019"
+author: "John Alan Willis"
+date: "1/16/2019"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r loadPackages}
+
+library(tidyverse)
+library(magrittr)
+library(stringr)
+library(Biostrings)
+library(BSgenome.Hsapiens.NCBI.GRCh38)
+library(ensembldb)
+library(liftOver)
+library(rtracklayer)
+
+```
+
+```{r loadTestData}
+
+testFusionCatcherV1 <- read_tsv("/mnt/mobydisk/groupshares/alee/shared/ovarian_Cancer_Project/tumor_Samples/frozen_Tissue_Paired_Samples/OVCA_01_E1/OVCA_01_E1-FusionCatcher-v1.00-hg38/final-list_candidate-fusion-genes.txt")
+
+head(testFusionCatcherV1)
+dim(testFusionCatcherV1)
+FusionCatcherV1Colnames <- colnames(testFusionCatcherV1)
+
+
+testFusionCatcherV0.9 <- read_tsv("/mnt/mobydisk/groupshares/alee/shared/ovarian_Cancer_Project/tumor_Samples/frozen_Tissue_Paired_Samples/OVCA_01_E1/OVCA_01_E1-fusioncatcher-v0.99.7b/final-list_candidate-fusion-genes.txt")
+head(testFusionCatcherV0.9)
+dim(testFusionCatcherV0.9)
+FusionCatcherV0.9Colnames <- colnames(testFusionCatcherV0.9)
+
+
+testSTARFusionV1.4 <- read_tsv("/mnt/mobydisk/groupshares/alee/shared/ovarian_Cancer_Project/tumor_Samples/frozen_Tissue_Paired_Samples/OVCA_01_E1/STAR-Fusion-v2.40-hg38/star-fusion.fusion_predictions.tsv")
+head(testSTARFusionV1.4)
+dim(testSTARFusionV1.4)
+STARFusionV1.4Colnames <- colnames(testSTARFusionV1.4)
+
+
+testSTARFusionV1.3 <- read_tsv("/mnt/mobydisk/groupshares/alee/shared/ovarian_Cancer_Project/tumor_Samples/frozen_Tissue_Paired_Samples/OVCA_01_E1/starFusion-v2.5.3a-hg38/star-fusion.fusion_candidates.final")
+head(testSTARFusionV1.3)
+dim(testSTARFusionV1.3)
+STARFusionV1.3Colnames <- colnames(testSTARFusionV1.3)
+
+testFusionZoomXiaosong <- read_tsv("/mnt/mobydisk/groupshares/alee/shared/ovarian_Cancer_Project/analysis/Xiaosong_Mapsplice2_FusionZoom_frozenSamples/mapSplice_Output_OVCAREC_BySampleRawFusions_30122018.txt")
+head(testFusionZoomXiaosong )
+dim(testFusionZoomXiaosong )
+testFusionZoomXiaosongColnames <- colnames(testFusionZoomXiaosong)
+
+#NOTE, having your sqlLITE and your working directory on different partitions leads to a disk IO error
+DBFile <- "/mnt/mobydisk/pan/genomics/data/alee/shared_RESOURCES/GRCh38/ensemblv82/Homo_sapiens.GRCh38.88.sqlite"
+DBFile2 <- "/ihome/alee/jaw212/databases/Homo_sapiens.GRCh38.94.sqlite"
+edb <-ensembldb::EnsDb(DBFile2)
+
+```
+
+
+```{r testLoadAllData}
+fusionDecoder <- read_tsv("../FusionTools/scripts/testOutput.txt")
+fusionTable <- pmap_df(fusionDecoder, readFusionCatcherDataset)
+dim(fusionTable)
+FCatcherTable <- parse_FusionCatcher_V1(fusionTable)
+dim(FCatcherTable)
+View(FCatcherTable)
+```
+
+
+```{r setupParserColNames}
+
+test_ParserColNames <- c("Fusion_Name", 
+                         "Gene1-Symbol", 
+                         "Gene1-ENSG",
+                         "Gene1-Exon", 
+                         "Gene1-Chromosome", 
+                         "Gene1-Breakpoint",
+                         "Gene1-Strand",
+                         "Gene1-Sequence",
+                         "Gene2-Symbol", 
+                         "Gene2-ENSG", 
+                         "Gene2-Exon", 
+                         "Gene2-Chromosome", 
+                         "Gene2-Breakpoint", 
+                         "Gene2-Strand",
+                         "Gene2-Sequence")
+
+gene1BreakpointCols <- c("Gene1-Chromosome", 
+                    "Gene1-Endpoint",
+                    "Gene1-Strand")
+
+gene2BreakpointCols <- c("Gene2-Chromosome", 
+                    "Gene2-Endpoint",
+                    "Gene2-Strand")
+
+matchedFusionCatcherV1ColNames <- c("Fusion_Name", 
+                                    "Gene_1_symbol(5end_fusion_partner)",
+                                    "Gene_1_id(5end_fusion_partner)",
+                                    "Exon_1_id(5end_fusion_partner)", 
+                         "Fusion_point_for_gene_1(5end_fusion_partner)",
+                         "Fusion_point_for_gene_1(5end_fusion_partner)", 
+                         "Fusion_point_for_gene_1(5end_fusion_partner)",
+                         "Fusion_Sequence",
+                         "Gene_2_symbol(3end_fusion_partner)",
+                          "Gene_2_id(3end_fusion_partner)",
+                         "Exon_2_id(3end_fusion_partner)", 
+                         "Fusion_point_for_gene_2(3end_fusion_partner)",
+                         "Fusion_point_for_gene_2(3end_fusion_partner)", 
+                         "Fusion_point_for_gene_2(3end_fusion_partner)",
+                         "Fusion_Sequence"
+                         )
+
+matchedFusionCatcherV0.9ColNames <- c("Fusion_Name", 
+                                    "Gene_1_symbol(5end_fusion_partner)",
+                                    "Gene_1_id(5end_fusion_partner)",
+                                    "Exon_1_id(5end_fusion_partner)", 
+                         "Fusion_point_for_gene_1(5end_fusion_partner)",
+                         "Fusion_point_for_gene_1(5end_fusion_partner)", 
+                         "Fusion_point_for_gene_1(5end_fusion_partner)",
+                         "Fusion_Sequence",
+                         "Gene_2_symbol(3end_fusion_partner)",
+                         "Gene_2_id(3end_fusion_partner)",
+                         "Exon_2_id(3end_fusion_partner)", 
+                         "Fusion_point_for_gene_2(3end_fusion_partner)",
+                         "Fusion_point_for_gene_2(3end_fusion_partner)", 
+                         "Fusion_point_for_gene_2(3end_fusion_partner)",
+                         "Fusion_Sequence"
+                         )
+
+
+matchedSTARFusionV1.3Colnames <- c("#FusionName", 
+                                 "LeftGene",
+                                  "LeftGene",
+                         "LeftGene", 
+                         "LeftBreakpoint", 
+                         "LeftBreakpoint",
+                         "LeftBreakpoint", 
+                         "LeftGene", 
+                         "RightGene",
+                         "RightGene",
+                         "RightGene", 
+                         "RightBreakpoint", 
+                         "RightBreakpoint",
+                         "RightBreakpoint",
+                         "RightGene"
+                         )
+
+matchedSTARFusionV1.4Colnames <- c("#FusionName", 
+                                 "LeftGene",
+                                  "LeftGene",
+                         "LeftGene", 
+                         "LeftBreakpoint", 
+                         "LeftBreakpoint",
+                         "LeftBreakpoint", 
+                         "LeftGene", 
+                         "RightGene",
+                         "RightGene",
+                         "RightGene", 
+                         "RightBreakpoint", 
+                         "RightBreakpoint",
+                         "RightBreakpoint",
+                         "RightGene"
+                         )
+
+fusionFeatureDF <- data.frame(parsedFusion = test_ParserColNames,
+                                  FusionCatcher_V0.9 = matchedFusionCatcherV0.9ColNames,
+                                  FusionCatcher_V1 = matchedFusionCatcherV1ColNames,
+                                  STARFusion_V1.3 = matchedSTARFusionV1.3Colnames,
+                                  STARFusion_V1.4 = matchedSTARFusionV1.4Colnames
+                                  )
+
+fusionFeatureMatrix <- rbind(parsedFusion = test_ParserColNames,
+                                  FusionCatcher_V0.9 = matchedFusionCatcherV0.9ColNames,
+                                  FusionCatcher_V1 = matchedFusionCatcherV1ColNames,
+                                  STARFusion_V1.3 = matchedSTARFusionV1.3Colnames,
+                                  STARFusion_V1.4 = matchedSTARFusionV1.4Colnames
+                                  )
+
+```
+
+```{r DefineParseFunctionsHardCodeAllCols}
+
+parse_FusionCatcher_V1 <-function(fusionDF) {
+  
+  Full_Name <- paste(fusionDF$`Gene_1_symbol(5end_fusion_partner)`, fusionDF$`Gene_2_symbol(3end_fusion_partner)`, sep = "--")
+  Gene1_Symbol <- fusionDF$`Gene_1_symbol(5end_fusion_partner)`
+  Gene1_ENSG <- fusionDF$`Gene_1_id(5end_fusion_partner)`
+  Gene1_Exon <- fusionDF$`Exon_1_id(5end_fusion_partner)`
+  Gene1_Chromosome <- str_split(fusionDF$`Fusion_point_for_gene_1(5end_fusion_partner)`, pattern = ":", simplify=TRUE)[,1]
+  Gene1_Breakpoint <- str_split(fusionDF$`Fusion_point_for_gene_1(5end_fusion_partner)`, pattern = ":", simplify=TRUE)[,2]
+  Gene1_Strand <- str_split(fusionDF$`Fusion_point_for_gene_1(5end_fusion_partner)`, pattern = ":", simplify=TRUE)[,3]
+  Gene1_Sequence <- str_split(fusionDF$Fusion_sequence, pattern = "\\*", simplify=TRUE)[,1]
+
+                            
+  Gene2_Symbol <- fusionDF$`Gene_2_symbol(3end_fusion_partner)`
+  Gene2_ENSG <- fusionDF$`Gene_2_id(3end_fusion_partner)`
+  Gene2_Exon <- fusionDF$`Exon_2_id(3end_fusion_partner)`
+  Gene2_Chromosome <- str_split(fusionDF$`Fusion_point_for_gene_2(3end_fusion_partner)`, pattern = ":", simplify=TRUE)[,1]
+  Gene2_Breakpoint <- str_split(fusionDF$`Fusion_point_for_gene_2(3end_fusion_partner)`, pattern = ":", simplify=TRUE)[,2]
+  Gene2_Strand <- str_split(fusionDF$`Fusion_point_for_gene_2(3end_fusion_partner)`, pattern = ":", simplify=TRUE)[,3]
+  Gene2_Sequence <- str_split(fusionDF$Fusion_sequence, pattern = "\\*", simplify=TRUE)[,2]
+  
+  SpanningReads <- fusionDF$Spanning_pairs
+  SplitPairs <- fusionDF$Spanning_unique_reads
+  CommonMappingReads <- fusionDF$Counts_of_common_mapping_reads
+  Annotations <- paste(fusionDF$Predicted_effect,fusionDF$Fusion_description, sep = ",")
+  
+  parsedDataDF=data.frame(
+    t(rbind("SAMPLE_ID"=fusionDF$SAMPLE_ID,
+                          "PATIENT_ID"=fusionDF$PATIENT_ID,
+                          "TIMEPOINT"=fusionDF$TIMEPOINT,
+                          "BATCH"=fusionDF$BATCH,
+                          "Program"="FusionCatcher_V1.0",
+            
+                          "Full_Name"=Full_Name,
+                          "SpanningReads"=SpanningReads,
+                          "SplitPairs"=SplitPairs,
+                          "CommonMappingReads"=CommonMappingReads,
+                          "Annotations"=Annotations,
+            
+                          "Gene1_Symbol"=Gene1_Symbol,
+                          "Gene1_ENSG"=Gene1_ENSG,
+                          "Gene1_Chromosome"=Gene1_Chromosome,
+                          "Gene1_Breakpoint"=Gene1_Breakpoint,
+                          "Gene1_Strand" = Gene1_Strand,
+                          "Gene1_Sequence" = as.character(Gene1_Sequence),
+            
+                          "Gene2_Symbol"=Gene2_Symbol,
+                          "Gene2_ENSG"=Gene2_ENSG,
+                          "Gene2_Chromosome"=Gene2_Chromosome,
+                          "Gene2_Breakpoint"=Gene2_Breakpoint,
+                          "Gene2_Strand" = Gene2_Strand, 
+                          "Gene2_Sequence" = as.character(Gene2_Sequence)
+          )
+      ), stringsAsFactors=FALSE
+  )
+  parsedDataDF <- distinct(parsedDataDF, Full_Name, SAMPLE_ID, PROGRAM, .keep_all = TRUE)
+  parsedDataDF
+}
+
+parse_FusionCatcher_V0.9 <-function(fusionDF) {
+    
+ Full_Name <- paste(fusionDF$`Gene_1_symbol(5end_fusion_partner)`, fusionDF$`Gene_2_symbol(3end_fusion_partner)`, sep = "--")
+  Gene1_Symbol <- fusionDF$`Gene_1_symbol(5end_fusion_partner)`
+  Gene1_ENSG <- fusionDF$`Gene_1_id(5end_fusion_partner)`
+  Gene1_Exon <- fusionDF$`Exon_1_id(5end_fusion_partner)`
+  Gene1_Chromosome <- str_split(fusionDF$`Fusion_point_for_gene_1(5end_fusion_partner)`, pattern = ":", simplify=TRUE)[,1]
+  Gene1_Breakpoint <- str_split(fusionDF$`Fusion_point_for_gene_1(5end_fusion_partner)`, pattern = ":", simplify=TRUE)[,2]
+  Gene1_Strand <- str_split(fusionDF$`Fusion_point_for_gene_1(5end_fusion_partner)`, pattern = ":", simplify=TRUE)[,3]
+  Gene1_Sequence <- str_split(fusionDF$Fusion_sequence, pattern = "\\*", simplify=TRUE)[,1]
+                            
+  Gene2_Symbol <- fusionDF$`Gene_2_symbol(3end_fusion_partner)`
+  Gene2_ENSG <- fusionDF$`Gene_2_id(3end_fusion_partner)`
+  Gene2_Exon <- fusionDF$`Exon_2_id(3end_fusion_partner)`
+  Gene2_Chromosome <- str_split(fusionDF$`Fusion_point_for_gene_2(3end_fusion_partner)`, pattern = ":", simplify=TRUE)[,1]
+  Gene2_Breakpoint <- str_split(fusionDF$`Fusion_point_for_gene_2(3end_fusion_partner)`, pattern = ":", simplify=TRUE)[,2]
+  Gene2_Strand <- str_split(fusionDF$`Fusion_point_for_gene_2(3end_fusion_partner)`, pattern = ":", simplify=TRUE)[,3]
+  Gene2_Sequence <- str_split(fusionDF$Fusion_sequence, pattern = "\\*", simplify=TRUE)[,2]
+  
+  SpanningReads <- fusionDF$Spanning_pairs
+  SplitPairs <- fusionDF$Spanning_unique_reads
+  CommonMappingReads <- fusionDF$Counts_of_common_mapping_reads
+  Annotations <- paste(fusionDF$Predicted_effect,fusionDF$Fusion_description, sep = ",")
+
+  
+  parsedDataDF=data.frame(
+    t(rbind("SAMPLE_ID"=fusionDF$SAMPLE_ID,
+                          "PATIENT_ID"=fusionDF$PATIENT_ID,
+                          "TIMEPOINT"=fusionDF$TIMEPOINT,
+                          "BATCH"=fusionDF$BATCH,
+                          "Program"="FusionCatcher_V0.9",
+            
+                          "Full_Name"=Full_Name,
+                          "SpanningReads"=SpanningReads,
+                          "SplitPairs"=SplitPairs,
+                          "CommonMappingReads"=CommonMappingReads,
+                          "Annotations"=Annotations,
+            
+                          "Gene1_Symbol"=Gene1_Symbol,
+                          "Gene1_ENSG"=Gene1_ENSG,
+                          "Gene1_Chromosome"=Gene1_Chromosome,
+                          "Gene1_Breakpoint"=Gene1_Breakpoint,
+                          "Gene1_Strand" = Gene1_Strand,
+                          "Gene1_Sequence" = as.character(Gene1_Sequence),
+            
+                          "Gene2_Symbol"=Gene2_Symbol,
+                          "Gene2_ENSG"=Gene2_ENSG,
+                          "Gene2_Chromosome"=Gene2_Chromosome,
+                          "Gene2_Breakpoint"=Gene2_Breakpoint,
+                          "Gene2_Strand" = Gene2_Strand, 
+                          "Gene2_Sequence" = as.character(Gene2_Sequence)
+          )
+      ), stringsAsFactors=FALSE
+  )
+
+  parsedDataDF <- distinct(parsedDataDF, Full_Name, .keep_all = TRUE)
+  parsedDataDF
+  
+}
+
+parse_STARFusion_V1.3 <-function(fusionDF) {
+  Full_Name <- fusionDF$`#FusionName`
+  Gene1_Symbol <- str_split(fusionDF$LeftGene, pattern = "\\^", simplify=TRUE)[,1]
+  Gene1_ENSG <- str_split(fusionDF$LeftGene, pattern = "\\^", simplify=TRUE)[,2]
+  Gene1_Exon <-NA
+  Gene1_Chromosome <- str_split(fusionDF$LeftBreakpoint, pattern = ":", simplify=TRUE)[,1]
+  Gene1_Breakpoint <- str_split(fusionDF$LeftBreakpoint, pattern = ":", simplify=TRUE)[,2]
+  Gene1_Strand <- str_split(fusionDF$LeftBreakpoint, pattern = ":", simplify=TRUE)[,3]
+  Gene1_Sequence <- NA
+
+                            
+  Gene2_Symbol <- str_split(fusionDF$RightGene, pattern = "\\^", simplify=TRUE)[,1]
+  Gene2_ENSG <- str_split(fusionDF$RightGene, pattern = "\\^", simplify=TRUE)[,2]
+  Gene2_Exon <- NA
+  Gene2_Chromosome <- str_split(fusionDF$RightBreakpoint, pattern = ":", simplify=TRUE)[,1]
+  Gene2_Breakpoint <- str_split(fusionDF$RightBreakpoint, pattern = ":", simplify=TRUE)[,2]
+  Gene2_Strand <- str_split(fusionDF$RightBreakpoint, pattern = ":", simplify=TRUE)[,3]
+  Gene2_Sequence <- NA
+  
+  SpanningReads <- fusionDF$JunctionReadCount
+  SplitPairs <- fusionDF$SpanningFragCount
+  CommonMappingReads <- NA
+  Annotations <- paste(fusionDF$SpliceType, fusionDF$LeftBreakpointEntropy, fusionDF$RightBreakpointEntropy, sep = ",")
+
+
+  parsedDataDF=data.frame(
+    t(rbind("SAMPLE_ID"=fusionDF$SAMPLE_ID,
+                          "PATIENT_ID"=fusionDF$PATIENT_ID,
+                          "TIMEPOINT"=fusionDF$TIMEPOINT,
+                          "BATCH"=fusionDF$BATCH,
+                          "Program"="STAR-Fusion_V1.3",
+            
+                          "Full_Name"=Full_Name,
+                          "SpanningReads"=SpanningReads,
+                          "SplitPairs"=SplitPairs,
+                          "CommonMappingReads"=CommonMappingReads,
+                          "Annotations"=Annotations,
+            
+                          "Gene1_Symbol"=Gene1_Symbol,
+                          "Gene1_ENSG"=Gene1_ENSG,
+                          "Gene1_Chromosome"=Gene1_Chromosome,
+                          "Gene1_Breakpoint"=Gene1_Breakpoint,
+                          "Gene1_Strand" = Gene1_Strand,
+                          "Gene1_Sequence" = as.character(Gene1_Sequence),
+            
+                          "Gene2_Symbol"=Gene2_Symbol,
+                          "Gene2_ENSG"=Gene2_ENSG,
+                          "Gene2_Chromosome"=Gene2_Chromosome,
+                          "Gene2_Breakpoint"=Gene2_Breakpoint,
+                          "Gene2_Strand" = Gene2_Strand, 
+                          "Gene2_Sequence" = as.character(Gene2_Sequence)
+          )
+      ), stringsAsFactors=FALSE
+  )
+  parsedDataDF <- distinct(parsedDataDF, Full_Name, .keep_all = TRUE)
+  parsedDataDF
+}
+
+parse_STARFusion_V1.4 <-function(fusionDF) {
+  
+ 
+  Full_Name <- fusionDF$`#FusionName`
+  Gene1_Symbol <- str_split(fusionDF$LeftGene, pattern = "\\^", simplify=TRUE)[,1]
+  Gene1_ENSG <- str_split(fusionDF$LeftGene, pattern = "\\^", simplify=TRUE)[,2]
+  Gene1_Exon <- NA
+  Gene1_Chromosome <- str_split(fusionDF$LeftBreakpoint, pattern = ":", simplify=TRUE)[,1]
+  Gene1_Breakpoint <- str_split(fusionDF$LeftBreakpoint, pattern = ":", simplify=TRUE)[,2]
+  Gene1_Strand <- str_split(fusionDF$LeftBreakpoint, pattern = ":", simplify=TRUE)[,3]
+  Gene1_Sequence <- NA
+                            
+  Gene2_Symbol <- str_split(fusionDF$RightGene, pattern = "\\^", simplify=TRUE)[,1]
+  Gene2_ENSG <- str_split(fusionDF$RightGene, pattern = "\\^", simplify=TRUE)[,2]
+  Gene2_Exon <- NA
+  Gene2_Chromosome <- str_split(fusionDF$RightBreakpoint, pattern = ":", simplify=TRUE)[,1]
+  Gene2_Breakpoint <- str_split(fusionDF$RightBreakpoint, pattern = ":", simplify=TRUE)[,2]
+  Gene2_Strand <- str_split(fusionDF$RightBreakpoint, pattern = ":", simplify=TRUE)[,3]
+  Gene2_Sequence <- NA
+    
+  SpanningReads <- fusionDF$JunctionReadCount
+  SplitPairs <- fusionDF$SpanningFragCount
+  CommonMappingReads <- NA
+  Annotations <- paste(fusionDF$SpliceType, fusionDF$FFPM, fusionDF$LeftBreakpointEntropy, fusionDF$RightBreakpointEntropy, sep = ",")
+  
+  parsedDataDF=data.frame(
+    t(rbind("SAMPLE_ID"=fusionDF$SAMPLE_ID,
+                          "PATIENT_ID"=fusionDF$PATIENT_ID,
+                          "TIMEPOINT"=fusionDF$TIMEPOINT,
+                          "BATCH"=fusionDF$BATCH,
+                          "Program"="STAR-Fusion_V1.4",
+            
+                          "Full_Name"=Full_Name,
+                          "SpanningReads"=SpanningReads,
+                          "SplitPairs"=SplitPairs,
+                          "CommonMappingReads"=CommonMappingReads,
+                          "Annotations"=Annotations,
+            
+                          "Gene1_Symbol"=Gene1_Symbol,
+                          "Gene1_ENSG"=Gene1_ENSG,
+                          "Gene1_Chromosome"=Gene1_Chromosome,
+                          "Gene1_Breakpoint"=Gene1_Breakpoint,
+                          "Gene1_Strand" = Gene1_Strand,
+                          "Gene1_Sequence" = as.character(Gene1_Sequence),
+            
+                          "Gene2_Symbol"=Gene2_Symbol,
+                          "Gene2_ENSG"=Gene2_ENSG,
+                          "Gene2_Chromosome"=Gene2_Chromosome,
+                          "Gene2_Breakpoint"=Gene2_Breakpoint,
+                          "Gene2_Strand" = Gene2_Strand, 
+                          "Gene2_Sequence" = as.character(Gene2_Sequence)
+          )
+      ), stringsAsFactors=FALSE
+  )
+  parsedDataDF <- distinct(parsedDataDF, Full_Name, .keep_all = TRUE)
+  parsedDataDF
+  }
+
+
+parse_FusionZoom_Xiaosong <-function(fusionDF) {
+  
+ 
+  Full_Name <- str_replace(fusionDF$`GeneRarrangements`, "->", "--")
+  Gene1_Symbol <- str_split(fusionDF$GeneRarrangements, pattern = "->", simplify=TRUE)[,1]
+  Gene1_ENSG <- NA
+  Gene1_Exon <- NA
+  Gene1_Chromosome <- str_split(
+    str_split(fusionDF$ChrRearrangeLocations, pattern = "->", simplify=TRUE)[,1],
+    pattern = ":", 
+    simplify = TRUE
+  )[,1]
+  Gene1_Breakpoint <- str_split(
+    str_split(fusionDF$ChrRearrangeLocations, pattern = "->", simplify=TRUE)[,1],
+    pattern = ":", 
+    simplify = TRUE
+  )[,2]
+  Gene1_Strand <- case_when(
+    str_split(fusionDF$FromTophat2_orientations, pattern = "", simplify=TRUE)[,1] == "f" ~ "+",
+    str_split(fusionDF$FromTophat2_orientations, pattern = "", simplify=TRUE)[,1] == "r" ~ "-",
+    TRUE ~ "NA")
+  
+  Gene1_Sequence <- str_split(fusionDF$CorrectedFusionJunctionSequences, " ", simplify = TRUE)[,1]
+                            
+  Gene2_Symbol <- str_split(fusionDF$GeneRarrangements, pattern = "->", simplify=TRUE)[,2]
+  Gene2_ENSG <- NA
+  Gene2_Exon <- NA
+  Gene2_Chromosome <- str_split(
+    str_split(fusionDF$ChrRearrangeLocations, pattern = "->", simplify=TRUE)[,2],
+    pattern = ":", 
+    simplify = TRUE
+  )[,1]
+  Gene2_Breakpoint <- str_split(
+    str_split(fusionDF$ChrRearrangeLocations, pattern = "->", simplify=TRUE)[,2],
+    pattern = ":", 
+    simplify = TRUE
+  )[,2]
+  Gene2_Strand <- case_when(
+    str_split(fusionDF$FromTophat2_orientations, pattern = "", simplify=TRUE)[,1] == "f" ~ "+",
+    str_split(fusionDF$FromTophat2_orientations, pattern = "", simplify=TRUE)[,1] == "r" ~ "-",
+    TRUE ~ "NA")
+  Gene2_Sequence <- str_split(fusionDF$CorrectedFusionJunctionSequences, " ", simplify = TRUE)[,2]
+    
+  SpanningReads <- fusionDF$`FromTophat2_the.number.of.reads.that.span.the.fusion(Mapsplice2:single_read_count)`
+  SplitPairs <- fusionDF$`FromTophat2_the.number.of.mate.pairs.that.support.the.fusion(Mapslice2:encompassing_readpair_count)`
+  CommonMappingReads <- fusionDF$`FromTophat2_the.number.of.reads.that.contradict.the.fusion.by.mapping.to.only.one.of.the.chromosomes(MapSplice2:multi_read_count)`
+  Annotations <- paste(fusionDF$`#RearrangeType`, fusionDF$FusionPartnersAreHomolog, fusionDF$Cautions, sep = ",")
+  
+  parsedDataDF=data.frame(
+    t(rbind("SAMPLE_ID"=fusionDF$SAMPLE_ID,
+                          "PATIENT_ID"=fusionDF$PATIENT_ID,
+                          "TIMEPOINT"=fusionDF$TIMEPOINT,
+                          "BATCH"=fusionDF$BATCH,
+                          "Program"="FusionZoom_Xiaosong",
+            
+                          "Full_Name"=Full_Name,
+                          "SpanningReads"=SpanningReads,
+                          "SplitPairs"=SplitPairs,
+                          "CommonMappingReads"=CommonMappingReads,
+                          "Annotations"=Annotations,
+            
+                          "Gene1_Symbol"=Gene1_Symbol,
+                          "Gene1_ENSG"=Gene1_ENSG,
+                          "Gene1_Chromosome"=Gene1_Chromosome,
+                          "Gene1_Breakpoint"=Gene1_Breakpoint,
+                          "Gene1_Strand" = Gene1_Strand,
+                          "Gene1_Sequence" = as.character(Gene1_Sequence),
+            
+                          "Gene2_Symbol"=Gene2_Symbol,
+                          "Gene2_ENSG"=Gene2_ENSG,
+                          "Gene2_Chromosome"=Gene2_Chromosome,
+                          "Gene2_Breakpoint"=Gene2_Breakpoint,
+                          "Gene2_Strand" = Gene2_Strand, 
+                          "Gene2_Sequence" = as.character(Gene2_Sequence)
+          )
+      ), stringsAsFactors=FALSE
+  )
+  parsedDataDF <- distinct(parsedDataDF, Full_Name, .keep_all = TRUE)
+  parsedDataDF
+}
+
+
+
+```
+
+```{r readProjectDataFxns}
+readFusionZoomDataset <- function(FILELOC, BATCH, PATIENT_ID, SAMPLE_ID, TIMEPOINT) {
+  tryCatch(df <- read_tsv(FILELOC) %>%
+             mutate(BATCH=BATCH,
+             PROGRAM = "FusionZoom",
+             PATIENT_ID = PATIENT_ID,
+            SAMPLE_ID = SAMPLE_ID,
+            TIMEPOINT = TIMEPOINT) %>%
+             parse_FusionZoom_Xiaosong(.),
+           error = function(e) data.frame())
+
+}
+readStarFusionDataset <- function(FILELOC, BATCH, PATIENT_ID, SAMPLE_ID, TIMEPOINT) {
+  tryCatch(df <- read_tsv(FILELOC) %>%
+             mutate(BATCH=BATCH,
+             PROGRAM = "STARFusion",
+             PATIENT_ID = PATIENT_ID,
+            SAMPLE_ID = SAMPLE_ID,
+            TIMEPOINT = TIMEPOINT) %>%
+             parse_STARFusion_V1.4(.),
+           error = function(e) data.frame())
+
+}
+
+
+readFusionCatcherDataset <- function(FILELOC, BATCH, PATIENT_ID, SAMPLE_ID, TIMEPOINT) {
+  tryCatch(df <- read_tsv(FILELOC) %>%
+             mutate(BATCH=BATCH,
+             PROGRAM = "FusionCatcher",
+             PATIENT_ID = PATIENT_ID,
+            SAMPLE_ID = SAMPLE_ID,
+            TIMEPOINT = TIMEPOINT),
+           error = function(e) data.frame())
+
+}
+
+
+
+```
+
+```{r fusionSetCharacterizationFunctions}
+
+#need to load the appropriate datasets for referencing
+
+#This function takes a list of genes and intersects them with the list of genes nolan generated in his differential expression analysis of the Paired Tumor Samples
+intersectFusionPartnersWithExpression2 <- function(x) {
+partnerCountTable <- table(unlist(strsplit(x$Full_Fusion, split='--')))
+sharedWith250Up <- intersect(top250OvcaUp[[1]], x)
+sharedWith250Down <- intersect(top250OvcaDOwn[[1]], x)
+sharedwithOutliers <- intersect(unlist(NolanOutliersAll$Gene), x)
+intersectionsList <-
+list(
+'sharedWith250Up' = sharedWith250Up,
+'sharedWith250Down' = sharedWith250Down,
+'sharedWithOutliers' = sharedwithOutliers
+)
+intersectionsList
+}
+
+
+
+#we generate a small temporary frame to use to intersect with nolan's fusions on a by sample level
+OutliersIntersector <-function(x) {
+  
+  x %>%
+  dplyr::select(SAMPLE_ID, Full_Fusion) %>%
+  tidyr::separate(Full_Fusion, into = c('RGene', 'LGene'), sep = '--')
+}
+
+sharedWithOutliersBySample <- full_join((semi_join(NolanOutliersAll, OutliersIntersector, by = c('Case'='SAMPLE_ID', 'Gene'='RGene'))), (semi_join(NolanOutliersAll, OutliersIntersector, by = c('Case'='SAMPLE_ID', 'Gene'='LGene'))))
+intersectionsList <-
+list(
+'fusionPartnersTable'=partnerCountTable,
+'sharedWith250Up' = sharedWith250Up,
+'sharedWith250Down' = sharedWith250Down,
+'sharedWithOutliers' = sharedWithOutliers,
+'sharedWithOutliersBySample' = sharedWithOutliersBySample
+)
+intersectionsList
+}
+
+
+#this function intersects a fusion set with the fusion sets produced by fusioncatcherV1.00 and STARfusion2.4 outputs on HGSOC-like cell lines
+#in intersects with both the union and intersection of the HGSOC fusioncaller outputs and passes them on to summary functionsdlply
+intersectWithHGSOCFusions <- function(x){
+  list(
+    'SharedWithHGSOCF1S2.4Intersect' = semi_join(SharedStarFusion2.4FusionCatcher1CCLEFusionsHGSOC,x, by='Full_Fusion'),
+    'SharedWithHGSOCF1S2.4Union' = semi_join(unionStarFusion2.4FusionCatcher1CCLEFusionsHGSOC,x, by='Full_Fusion'))
+}
+
+```
+
+```{r readDataFunctions}
+
+
+#Lets also read in the sample names from our lists in the ovcaCCLE, ovcaPEO, and ovCaTUmors sets
+#We'll paste the addresses of key files in the resulting frames
+
+CCLESamples <- read.delim('C:/Users/rechn/Documents/LeeLab/ovarianCancerProject/Bioinformatics/samples/ovCaCCLELines/ccle-ovca-line-list.txt', header = FALSE)
+CCLESamples <- cbind(CCLESamples, paste0("../samples/ovCaCCLELines/", CCLESamples[,1], "/fusioncatcher-v1.00/final-list_candidate-fusion-genes.txt"))
+names(CCLESamples) <- c('sampleName', 'dataLoc')
+CCLESamples$dataLoc <- as.character(CCLESamples$dataLoc)
+
+PEOSamples <- read.delim('C:/Users/rechn/Documents/LeeLab/ovarianCancerProject/Bioinformatics/samples/ovCaPEOLines/PEOLinesSampleList.txt', header = FALSE)
+PEOSamples <- cbind(PEOSamples, paste0("../samples/ovCaPEOLines/", PEOSamples[,1], "/fusioncatcher-v1.00/final-list_candidate-fusion-genes.txt"))
+names(PEOSamples) <- c('sampleName', 'dataLoc')
+PEOSamples$dataLoc <- as.character(PEOSamples$dataLoc)
+
+
+TumorSamples <- read.delim('C:/Users/rechn/Documents/LeeLab/ovarianCancerProject/Bioinformatics/samples/ovCaRecurrenceTumors/OVCAPairsListClean.txt', header = FALSE)
+TumorSamples <- cbind(TumorSamples, paste0("../samples/ovCaRecurrenceTumors/", TumorSamples[,1], "/fusioncatcher-v1.00/final-list_candidate-fusion-genes.txt"))
+names(TumorSamples) <- c('sampleName', 'dataLoc')
+TumorSamples$dataLoc <- as.character(TumorSamples$dataLoc)
+
+#We'll also read in some of nolan's differentially expressed gene lists to intersect with our fusion partners lists
+top250OvcaUp <- read.delim('C:/Users/rechn/Documents/LeeLab/ovarianCancerProject/FromNolan/ovca-recurrence-project/ovca-recurrence-project/differential-expression/ovca-tumors/ovca-tumors-deseq/tumors-deseq-output/2017-05-18/top250ovcaUp.log2FoldChange.txt', header=FALSE, stringsAsFactors=FALSE)
+
+top250OvcaDOwn <- read.delim('C:/Users/rechn/Documents/LeeLab/ovarianCancerProject/FromNolan/ovca-recurrence-project/ovca-recurrence-project/differential-expression/ovca-tumors/ovca-tumors-deseq/tumors-deseq-output/2017-05-18/top250ovcaDown.log2FoldChange.txt', header=FALSE, stringsAsFactors=FALSE)
+
+NolanOutliersAll <- read.csv('C:/Users/rechn/Documents/LeeLab/ovarianCancerProject/FromNolan/ovca-recurrence-project/ovca-recurrence-project/differential-expression/ovca-tumors/ovca-tumors-deseq/tumors-deseq-output/2017-05-18/OVCA.outliers.all.csv', header=TRUE, stringsAsFactors = FALSE)
+
+
+```
+
+```{r testMatrix}
+
+
+parse_FusionCaller <-function(fusionDF, fusionCaller) {
+  parsedDataDF <- data.frame()
+
+  parsedDataDF[[,fusionFeatureMatrix["parsedFusion",]]] <- fusionDF[[,fusionFeatureMatrix[fusionCaller,][-1]]]
+  
+  parsedDataDF[["Full_Name"]][1] <- paste(parsedDataDF[["Gene1-Symbol"]][1], parsedDataDF[["Gene2-Symbol"]][1], sep = "--")
+  
+  
+  parsedDataDF[[gene1BreakpointCols]][1] <- str_split(parsedDataDF[[gene1BreakpointCols[1]]], pattern = ":")[c(1,2,3)]
+  
+  parsedDataDF[[gene2BreakpointCols]][1] <- str_split(parsedDataDF[[gene2BreakpointCols[1]]], pattern = ":")[c(1,2,3)]
+  
+  parsedDataDF
+  
+}
+
+
+
+```
+
+```{r defineFunctionalizedParsers}
+parse_FusionCatcher_V1f <-function(fusionDF) {
+  sourceCols <- as.character(fusionFeatureDF[["FusionCatcher_V1"]])[-1]
+  targetCols <- as.character(fusionFeatureDF[["parsedFusion"]])[-1]
+ 
+  parsedDataDF <- map(sourceCols, function(col) extract(fusionDF, col)) %>%
+    data.frame() %>%
+    set_colnames(targetCols) %>%
+    mutate(`Gene1-Chromosome` = (str_split(`Gene1-Chromosome`, pattern = ":", simplify=TRUE,)[,1]), 
+           `Gene1-Breakpoint` = (str_split(`Gene1-Breakpoint`, pattern = ":", simplify=TRUE,)[,2]), 
+           `Gene1-Strand` = (str_split(`Gene1-Strand`, pattern = ":", simplify=TRUE,)[,3]), 
+           `Gene2-Chromosome` = (str_split(`Gene2-Chromosome`, pattern = ":", simplify=TRUE,)[,1]), 
+           `Gene2-Breakpoint` = (str_split(`Gene2-Breakpoint`, pattern = ":", simplify=TRUE,)[,2]), 
+           `Gene2-Strand` = (str_split(`Gene2-Strand`, pattern = ":", simplify=TRUE,)[,3])
+           )
+  
+  parsedDataDF
+}
+
+parse_FusionCatcher_V0.9f <-function(fusionDF) {
+  sourceCols <- as.character(fusionFeatureDF[["FusionCatcher_0.9"]])[-1]
+  targetCols <- as.character(fusionFeatureDF[["parsedFusion"]])[-1]
+ 
+  parsedDataDF <- map(sourceCols, function(col) extract(fusionDF, col)) %>%
+    data.frame() %>%
+    set_colnames(targetCols) %>%
+    mutate(`Gene1-Chromosome` = (str_split(`Gene1-Chromosome`, pattern = ":", simplify=TRUE,)[,1]), 
+           `Gene1-Breakpoint` = (str_split(`Gene1-Breakpoint`, pattern = ":", simplify=TRUE,)[,2]), 
+           `Gene1-Strand` = (str_split(`Gene1-Strand`, pattern = ":", simplify=TRUE,)[,3]), 
+           `Gene2-Chromosome` = (str_split(`Gene2-Chromosome`, pattern = ":", simplify=TRUE,)[,1]), 
+           `Gene2-Breakpoint` = (str_split(`Gene2-Breakpoint`, pattern = ":", simplify=TRUE,)[,2]), 
+           `Gene2-Strand` = (str_split(`Gene2-Strand`, pattern = ":", simplify=TRUE,)[,3])
+           )
+  
+  parsedDataDF
+  
+}
+
+
+parse_STARFusion_V1.3f <-function(fusionDF) {
+
+  sourceCols <- as.character(fusionFeatureDF[["STARFusion_V1.4"]])
+  targetCols <- as.character(fusionFeatureDF[["parsedFusion"]])
+ 
+  parsedDataDF <- map(sourceCols, function(col) extract(fusionDF, col)) %>%
+    data.frame() %>%
+    set_colnames(targetCols) %>%
+    mutate(`Gene1-Symbol` = (str_split(`Gene1-Symbol`, pattern = "\\^", simplify=TRUE,)[,1]),
+           `Gene1-ENSG` = (str_split(`Gene1-ENSG`, pattern = "\\^", simplify=TRUE,)[,1]), 
+           `Gene1-Exon` = NA,
+           `Gene1-Chromosome` = (str_split(`Gene1-Chromosome`, pattern = ":", simplify=TRUE,)[,1]), 
+           `Gene1-Breakpoint` = (str_split(`Gene1-Breakpoint`, pattern = ":", simplify=TRUE,)[,2]), 
+           `Gene1-Strand` = (str_split(`Gene1-Strand`, pattern = ":", simplify=TRUE,)[,3]), 
+           `Gene2-Symbol` = (str_split(`Gene2-Symbol`, pattern = "\\^", simplify=TRUE,)[,1]),
+           `Gene2-ENSG` = (str_split(`Gene2-ENSG`, pattern = "\\^", simplify=TRUE,)[,1]), 
+           `Gene2-Exon` = NA,
+           `Gene2-Chromosome` = (str_split(`Gene2-Chromosome`, pattern = ":", simplify=TRUE,)[,1]), 
+           `Gene2-Breakpoint` = (str_split(`Gene2-Breakpoint`, pattern = ":", simplify=TRUE,)[,2]), 
+           `Gene2-Strand` = (str_split(`Gene2-Strand`, pattern = ":", simplify=TRUE,)[,3])
+           )
+  
+  parsedDataDF
+}
+
+parse_STARFusion_V1.4f <-function(fusionDF) {
+  
+  sourceCols <- as.character(fusionFeatureDF[["STARFusion_V1.4"]])
+  targetCols <- as.character(fusionFeatureDF[["parsedFusion"]])
+ 
+  parsedDataDF <- map(sourceCols, function(col) extract(fusionDF, col)) %>%
+    data.frame() %>%
+    set_colnames(targetCols) %>%
+    mutate(`Gene1-Symbol` = (str_split(`Gene1-Symbol`, pattern = "\\^", simplify=TRUE,)[,1]),
+           `Gene1-ENSG` = (str_split(`Gene1-ENSG`, pattern = "\\^", simplify=TRUE,)[,1]), 
+           `Gene1-Exon` = NA,
+           `Gene1-Chromosome` = (str_split(`Gene1-Chromosome`, pattern = ":", simplify=TRUE,)[,1]), 
+           `Gene1-Breakpoint` = (str_split(`Gene1-Breakpoint`, pattern = ":", simplify=TRUE,)[,2]), 
+           `Gene1-Strand` = (str_split(`Gene1-Strand`, pattern = ":", simplify=TRUE,)[,3]), 
+           `Gene2-Symbol` = (str_split(`Gene2-Symbol`, pattern = "\\^", simplify=TRUE,)[,1]),
+           `Gene2-ENSG` = (str_split(`Gene2-ENSG`, pattern = "\\^", simplify=TRUE,)[,1]), 
+           `Gene2-Exon` = NA,
+           `Gene2-Chromosome` = (str_split(`Gene2-Chromosome`, pattern = ":", simplify=TRUE,)[,1]), 
+           `Gene2-Breakpoint` = (str_split(`Gene2-Breakpoint`, pattern = ":", simplify=TRUE,)[,2]), 
+           `Gene2-Strand` = (str_split(`Gene2-Strand`, pattern = ":", simplify=TRUE,)[,3])
+           )
+  
+  parsedDataDF
+  }
+```
+
+```{r GRangesHelperFunctions}
+getFusionTranscriptsRanges <- function(fusion, db) {
+  transcriptList <- map(fusion$Gene1-Symbol, function(x) transcripts(db, filter = SymbolFilter(x)))
+  transcriptList
+}
+
+getFusionExonRanges <- function(fusion, db) {
+  transcriptList <- map(fusion$Gene1-Symbol, function(x) exonsBy(db, filter = SymbolFilter(x)))
+  transcriptList
+}
+
+getFusionIntronRanges <- function(fusion, db) {
+  transcriptList <- map(fusion$Gene1-Symbol, function(x) intronsByTranscript(db, filter = SymbolFilter(x)))
+  transcriptList
+}
+
+getFusionTranscriptSequences <- function(transcriptsList, db) {
+  seq <- getSeq(db, transcriptList)
+  seq
+}
+
+
+```
+
+```{r writeVCFFunction}
+#Note - These functions run on a single fusion record, not a full fusion DF
+
+vcfFields <- c("CHROM",
+               "POS",
+               "ID",
+               "REF",
+               "ALT",
+               "QUAL",
+               "FILTER",
+               "INFO")
+
+getMetaForVCF <- function()
+
+checkPartnerOrientations <- function(fusion) {
+  congruentOrientation <- fusion$Gene1_Strand == fusion$Gene2_Strand
+  congruentOrientation
+}
+
+VCFFromFusionCaller <- function(fusion, addMeta=FALSE) {
+  if(addMeta) {
+    metaInfo <- getMetaForVCF()
+  }
+  orientation <- checkPartnerOrientations(fusion)
+  vcfData <- data.frame()
+  vcfData[1,1] <- fusion$Gene1_Chromosome
+  vcfData[1,2] <- fusion$Gene1_Breakpoint
+  vcfData[1,3] <- fusion$Gene1_Symbol
+  vcfData[1,4] <- getLastBaseOfGene1(fusion)
+  if(orientation) {
+    vcfData[1,5] <- paste0(getLastBaseOfGene1(fusion), "[", fusion$Gene2_Chromosome, ":", fusion$Gene2_Breakpoint, "[")
+  }
+  else {
+    message("unmatched fusion partner gene orientations")
+  }
+  
+  vcfData[1,6] <- "NA"
+  vcfData[1,7] <- "PASS"
+  vcfData[1,8] <- "SVTYPE=BND"
+  colnames(vcfData) <- vcfFields
+  vcfData
+  
+  
+}
+
+
+```
+
+```{r liftOverSetup}
+path = system.file(package="liftOver", "extdata", "hg38ToHg19.over.chain")
+ch = import.chain(path)
+seqlevelsStyle(cur) = "NCBI" 
+
+```
+
+```{r writeProtienPaintFormat}
+#Note that while VCFs, Fusioncatcher, and STARFUSION output 1 based breakpoint coordinates, ProteinPaint uses 0 based coordinates
+protPaintFields <- c("gene_a",
+               "isoform_a",
+               "chr_a",
+               "position_a",
+               "strand_a",
+               "gene_b",
+               "isoform_b",
+               "chr_b",
+               "position_b",
+               "strand_b")
+
+getMetaForProtPaint <- function()
+
+protPaintFromFusionCaller <- function(fusion, addMeta=FALSE) {
+  if(addMeta) {
+    metaInfo <- getMetaForProtPaint()
+  }
+  
+  proteinPaintData <- c(as.character(fusion$Gene1_Chromosome),
+    as.character(fusion$Gene1_ENSG),
+    paste0("chr",as.character(fusion$Gene1_Symbol)),
+    (as.integer(fusion$Gene1_Breakpoint) - 1),
+    as.character(fusion$Gene1_Strand),
+  as.character(fusion$Gene2_Chromosome),
+  as.character(fusion$Gene2_ENSG),
+  paste0("chr",as.character(fusion$Gene2_Symbol)),
+  (as.integer(fusion$Gene2_Breakpoint) - 1),
+  as.character(fusion$Gene2_Strand)
+  )
+  #names(protienPaintData) <- protPaintFields
+  
+  proteinPaintData
+  
+}
+
+
+
+protPaintFromFusionCaller(testFC09[1,])
+
+```
+
+```{r fusionAnalysisFunctions}
+#Note - These functions run on a single fusion record, not a full fusion DF
+getLastBaseOfGene1 <- function(fusion) {
+  Gene1Bases <- str_split(fusion$Gene1_Sequence, '', simplify=TRUE)
+  lastBase <- Gene1Bases[length(Gene1Bases)]
+  lastBase
+}
+
+getFirstBaseOfGene2 <- function(fusion) {
+  Gene2Bases <- str_split(fusion$Gene2_Sequence, '', simplify=TRUE)
+  firstBase <- Gene2Bases[1]
+  firstBase
+}
+
+getGene1DNASeq <- function(fusion, genome = BSgenome.Hsapiens.NCBI.GRCh38, txdb=edb) {
+  getSeq(genome, genes(txdb, filter=SymbolFilter(fusion$Gene1_Symbol)))
+  
+}
+
+getGene2DNASeq <- function(fusion, genome = BSgenome.Hsapiens.NCBI.GRCh38, txdb=edb) {
+  getSeq(genome, genes(txdb, filter=SymbolFilter(fusion$Gene2_Symbol)))
+  
+}
+
+```
+
+```{r setupParserTests}
+testFC09<- parse_FusionCatcher_V0.9(testFusionCatcherV0.9)
+testFC1<- parse_FusionCatcher_V1(testFusionCatcherV1)
+testSF1.3<- parse_STARFusion_V1.3(testSTARFusionV1.3)
+testSF1.4<- parse_STARFusion_V1.4(testSTARFusionV1.4)
+testFZXiaosong<- parse_FusionZoom_Xiaosong(testFusionZoomXiaosong)
+
+
+```
+
